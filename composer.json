@@ -48,6 +48,9 @@
             "aliases": {
                 "Workflow": "Atannex\\Workflow\\Facades\\Workflow"
             }
+        },
+        "branch-alias": {
+            "dev-main": "1.x-dev"
         }
     },
     "scripts": {
