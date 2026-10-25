@@ -1,5 +1,10 @@
 # atannex/workflow
 
+[![Tests](https://github.com/atannex/workflow/actions/workflows/tests.yml/badge.svg)](https://github.com/atannex/workflow/actions/workflows/tests.yml)
+[![PHP](https://img.shields.io/badge/PHP-8.3%2B-777BB4?logo=php&logoColor=white)](composer.json)
+[![Laravel](https://img.shields.io/badge/Laravel-11%20%7C%2012-FF2D20?logo=laravel&logoColor=white)](composer.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
+
 A workflow engine for Laravel Eloquent models. Define states and transitions once; the engine handles who may do what, multi-person approvals, task inboxes, deadlines with escalation, timers, automatic steps and a full audit trail. Every change runs in a database transaction with the instance row locked.
 
 - **States and transitions**: from one or more states (or `*`) to one, with labels, colours and icons for the UI.
