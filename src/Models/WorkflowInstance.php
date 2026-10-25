@@ -120,6 +120,25 @@ class WorkflowInstance extends Model
         return $this->approvals()->where('transition', $transition)->where('round', $this->round);
     }
 
+    /**
+     * Approvals cast for a transition in this visit to its state.
+     */
+    public function approvalCount(string $transition): int
+    {
+        return $this->votes($transition)->where('decision', WorkflowApproval::APPROVE)->count();
+    }
+
+    /**
+     * Whether a user has approved the transition in this visit.
+     */
+    public function approvedBy(string $transition, int|string|null $userId): bool
+    {
+        return $userId !== null && $this->votes($transition)
+            ->where('user_id', $userId)
+            ->where('decision', WorkflowApproval::APPROVE)
+            ->exists();
+    }
+
     public function scopeForSubject(Builder $query, Model $subject): Builder
     {
         return $query->where('subject_type', $subject->getMorphClass())->where('subject_id', (string) $subject->getKey());

@@ -27,6 +27,11 @@ class WorkflowApproval extends Model
         return 'approvals';
     }
 
+    public function isApproval(): bool
+    {
+        return $this->decision === self::APPROVE;
+    }
+
     public function instance(): BelongsTo
     {
         return $this->belongsTo(WorkflowInstance::class, 'instance_id');

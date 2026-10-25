@@ -123,6 +123,15 @@ Workflow::reassign($task, 'role:legal', $by);
 
 Who holds which roles and permissions is read from spatie/laravel-permission when installed. Otherwise use `app(Assignees::class)->resolveIdentitiesUsing(fn ($user) => ['role' => [...], 'permission' => [...]])`.
 
+Votes on an approval transition, for this visit to the state:
+
+```php
+$instance = $invoice->workflow()->instance();
+$instance->approvalCount('approve');          // approvals so far
+$instance->approvedBy('approve', $user->id);   // has this user approved?
+$instance->votes('approve')->get()->filter->isApproval();
+```
+
 ## Guards
 
 | Guard                             | Passes when                                            |

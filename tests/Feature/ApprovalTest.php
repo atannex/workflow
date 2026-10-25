@@ -62,6 +62,23 @@ class ApprovalTest extends TestCase
         }
     }
 
+    public function test_the_instance_tallies_votes(): void
+    {
+        [$article] = $this->submitted();
+        $first = $this->user('Ebot', ['editor']);
+        $instance = fn () => $article->workflow()->instance()->refresh();
+
+        $this->assertSame(0, $instance()->approvalCount('approve'));
+        $this->assertFalse($instance()->approvedBy('approve', $first->id));
+
+        $article->workflow()->apply('approve', $first);
+
+        $this->assertSame(1, $instance()->approvalCount('approve'));
+        $this->assertTrue($instance()->approvedBy('approve', $first->id));
+        $this->assertFalse($instance()->approvedBy('approve', null));
+        $this->assertTrue($instance()->votes('approve')->first()->isApproval());
+    }
+
     public function test_a_rejection_sends_it_back_and_votes_do_not_carry_over(): void
     {
         [$article, $author] = $this->submitted();
