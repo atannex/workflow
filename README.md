@@ -7,11 +7,3 @@ Moves Laravel records through a set of steps, such as draft, in review, approved
 ```bash
 composer require atannex/workflow
 ```
-
-## Documentation
-
-The full guide is in [docs/README.md](docs/README.md).
-
-## License
-
-MIT.
