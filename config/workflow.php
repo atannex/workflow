@@ -47,6 +47,9 @@ return [
 
     'connections' => [],
 
+    // Subjects (model classes) whose workflow stays on "connection" even while workflows follow their subjects.
+    'central_subjects' => [],
+
     'tables' => [
         'instances' => 'workflow_instances',
         'history' => 'workflow_history',

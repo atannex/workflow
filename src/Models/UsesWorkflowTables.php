@@ -29,13 +29,16 @@ trait UsesWorkflowTables
         return config('workflow.connection') ?? parent::getConnectionName();
     }
 
-    /** An instance's tasks, history and votes live on the instance's own connection. */
+    /** An instance's tasks, history and votes live on the instance's own connection; anything else keeps its own. */
     protected function newRelatedInstance($class)
     {
         $related = parent::newRelatedInstance($class);
 
         if (Connections::follows() && in_array(UsesWorkflowTables::class, class_uses_recursive($related), true)) {
             $related->setConnection($this->getConnectionName());
+        } elseif (Connections::follows() && $related->getConnectionName() === $this->getConnectionName() && ! (new $class)->getConnectionName()) {
+            // Read from a subject's own database, the people it names (actors, assignees) are still the default one's.
+            $related->setConnection(config('database.default'));
         }
 
         return $related;

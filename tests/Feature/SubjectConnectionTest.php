@@ -80,4 +80,17 @@ class SubjectConnectionTest extends TestCase
         $this->assertSame(1, $report['overdue']);
         $this->assertNotNull(WorkflowTask::on('shop')->value('overdue_at'));
     }
+
+    public function test_a_central_subject_keeps_its_workflow_on_the_default_connection(): void
+    {
+        config(['workflow.central_subjects' => [Good::class]]);
+        $author = $this->user('Ayuk');
+        $good = Good::query()->create(['title' => 'Toghu', 'author_id' => $author->id]);
+
+        $good->workflow()->apply('submit', $author);
+
+        $this->assertSame(0, WorkflowInstance::on('shop')->count());
+        $this->assertSame(1, WorkflowInstance::query()->where('subject_type', $good->getMorphClass())->count());
+        $this->assertSame('review', $good->fresh()->workflow()->state());
+    }
 }

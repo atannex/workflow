@@ -27,7 +27,23 @@ final class Connections
     {
         $default = config('workflow.connection');
 
-        return self::follows() ? ($subject->getConnectionName() ?? $default) : $default;
+        return self::follows() && ! self::central($subject) ? ($subject->getConnectionName() ?? $default) : $default;
+    }
+
+    /**
+     * Whether the subject's workflow stays on the default connection even
+     * while workflows follow their subjects (workflow.central_subjects):
+     * a review queue that spans subjects on several databases, say.
+     */
+    public static function central(Model $subject): bool
+    {
+        foreach ((array) config('workflow.central_subjects', []) as $class) {
+            if ($subject instanceof $class) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
