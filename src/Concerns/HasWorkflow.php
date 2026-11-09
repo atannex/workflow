@@ -6,6 +6,7 @@ namespace Atannex\Workflow\Concerns;
 
 use Atannex\Workflow\Engine\WorkflowEngine;
 use Atannex\Workflow\Models\WorkflowInstance;
+use Atannex\Workflow\Support\Connections;
 use Atannex\Workflow\Support\SubjectWorkflow;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -52,7 +53,14 @@ trait HasWorkflow
 
     public function workflowInstances(): MorphMany
     {
-        return $this->morphMany(WorkflowInstance::class, 'subject');
+        if (! Connections::follows()) {
+            return $this->morphMany(WorkflowInstance::class, 'subject');
+        }
+
+        // Following subjects: read on the connection that holds this subject's workflow.
+        $instance = WorkflowInstance::on(Connections::for($this))->getModel();
+
+        return $this->newMorphMany($instance->newQuery(), $this, $instance->qualifyColumn('subject_type'), $instance->qualifyColumn('subject_id'), $this->getKeyName());
     }
 
     /**

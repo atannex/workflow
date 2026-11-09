@@ -29,6 +29,7 @@ use Atannex\Workflow\Models\WorkflowInstance;
 use Atannex\Workflow\Models\WorkflowTask;
 use Atannex\Workflow\Support\Actor;
 use Atannex\Workflow\Support\Assignees;
+use Atannex\Workflow\Support\Connections;
 use Atannex\Workflow\Support\Duration;
 use Atannex\Workflow\Support\Values;
 use Atannex\Workflow\WorkflowRegistry;
@@ -108,7 +109,7 @@ final class WorkflowEngine
 
         $definition = $this->definition($subject, $workflow);
 
-        return WorkflowInstance::query()
+        return WorkflowInstance::on(Connections::for($subject))
             ->forSubject($subject)
             ->where('workflow', $definition->name)
             ->first();
@@ -156,8 +157,8 @@ final class WorkflowEngine
         }
 
         try {
-            $instance = $this->transaction(function () use ($definition, $subject, $actor, $state, $context) {
-                $instance = WorkflowInstance::query()->create([
+            $instance = $this->transactionOn(Connections::for($subject), function () use ($definition, $subject, $actor, $state, $context) {
+                $instance = WorkflowInstance::on(Connections::for($subject))->create([
                     'workflow' => $definition->name,
                     'subject_type' => $subject->getMorphClass(),
                     'subject_id' => (string) $subject->getKey(),
@@ -300,9 +301,9 @@ final class WorkflowEngine
     {
         $instance = $this->resolveInstance($target) ?? throw new TransitionNotAllowed($transition, [__('This item is not in a workflow.')]);
 
-        $outcome = $this->transaction(function () use ($instance, $transition, $actor, $options, $decision) {
+        $outcome = $this->transactionOn($instance->getConnectionName(), function () use ($instance, $transition, $actor, $options, $decision) {
             /** @var WorkflowInstance $instance */
-            $instance = WorkflowInstance::query()->lockForUpdate()->findOrFail($instance->getKey());
+            $instance = $instance->newQuery()->lockForUpdate()->findOrFail($instance->getKey());
             $definition = $instance->definition();
             $definitionTransition = $definition->getTransition($transition);
             $subject = $this->subjectOf($instance);
@@ -424,7 +425,7 @@ final class WorkflowEngine
             throw ValidationException::withMessages(['comment' => __('Say why you reject it.')]);
         }
 
-        $approval = WorkflowApproval::query()->updateOrCreate(
+        $approval = WorkflowApproval::on($instance->getConnectionName())->updateOrCreate(
             ['instance_id' => $instance->getKey(), 'transition' => $transition->name, 'round' => $instance->round, 'user_id' => $context->actor->id()],
             ['decision' => $decision, 'comment' => $context->comment],
         );
@@ -678,7 +679,20 @@ final class WorkflowEngine
     {
         $report = ['timers' => 0, 'automatic' => 0, 'overdue' => 0, 'escalated' => 0, 'failed' => 0];
 
-        WorkflowInstance::query()
+        // Every database that holds workflows (Support\Connections).
+        foreach (Connections::all() as $connection) {
+            $this->tickOn($connection, $report);
+        }
+
+        return $report;
+    }
+
+    /**
+     * @param  array{timers: int, automatic: int, overdue: int, escalated: int, failed: int}  $report
+     */
+    private function tickOn(?string $connection, array &$report): void
+    {
+        WorkflowInstance::on($connection)
             ->active()
             ->whereNotNull('timer_at')
             ->where('timer_at', '<=', now())
@@ -701,7 +715,7 @@ final class WorkflowEngine
                 continue;
             }
 
-            WorkflowInstance::query()
+            WorkflowInstance::on($connection)
                 ->where('workflow', $definition->name)
                 ->whereIn('status', [WorkflowInstance::ACTIVE, WorkflowInstance::COMPLETED])
                 ->whereIn('state', $states)
@@ -712,7 +726,7 @@ final class WorkflowEngine
                 });
         }
 
-        WorkflowTask::query()
+        WorkflowTask::on($connection)
             ->overdue()
             ->whereNull('overdue_at')
             ->with('instance')
@@ -723,7 +737,6 @@ final class WorkflowEngine
                 $report['escalated'] += $this->guarded(fn () => $this->handleOverdue($task), $task->instance) ?? 0;
             });
 
-        return $report;
     }
 
     private function fireTimer(WorkflowInstance $instance): bool
@@ -739,8 +752,8 @@ final class WorkflowEngine
         } catch (TransitionNotAllowed $e) {
             // The guards say no (e.g. a condition no longer holds): move on to
             // the state's next timer instead of retrying this one forever.
-            $this->transaction(function () use ($instance) {
-                $instance = WorkflowInstance::query()->lockForUpdate()->find($instance->getKey());
+            $this->transactionOn($instance->getConnectionName(), function () use ($instance) {
+                $instance = $instance->newQuery()->lockForUpdate()->find($instance->getKey());
 
                 if ($instance === null) {
                     return;
@@ -764,9 +777,9 @@ final class WorkflowEngine
     {
         $instance = $task->instance;
 
-        $escalated = $this->transaction(function () use ($task, $instance) {
+        $escalated = $this->transactionOn($task->getConnectionName(), function () use ($task, $instance) {
             /** @var WorkflowTask|null $task */
-            $task = WorkflowTask::query()->lockForUpdate()->find($task->getKey());
+            $task = $task->newQuery()->lockForUpdate()->find($task->getKey());
 
             if ($task === null || $task->overdue_at !== null || ! $task->isOpen()) {
                 return 0;
@@ -824,8 +837,8 @@ final class WorkflowEngine
      */
     public function claim(WorkflowTask $task, Authenticatable $user): WorkflowTask
     {
-        return $this->transaction(function () use ($task, $user) {
-            $task = WorkflowTask::query()->lockForUpdate()->findOrFail($task->getKey());
+        return $this->transactionOn($task->getConnectionName(), function () use ($task, $user) {
+            $task = $task->newQuery()->lockForUpdate()->findOrFail($task->getKey());
 
             if (! $task->isOpen() || ! $task->isFor($user)) {
                 throw new TaskNotAllowed(__('This task is not yours to take.'));
@@ -857,14 +870,14 @@ final class WorkflowEngine
      */
     public function complete(WorkflowTask $task, Authenticatable $user, ?string $comment = null): WorkflowTask
     {
-        $task = $this->transaction(function () use ($task, $user, $comment) {
-            $task = WorkflowTask::query()->lockForUpdate()->findOrFail($task->getKey());
+        $task = $this->transactionOn($task->getConnectionName(), function () use ($task, $user, $comment) {
+            $task = $task->newQuery()->lockForUpdate()->findOrFail($task->getKey());
 
             if (! $task->isOpen() || ! $task->isFor($user)) {
                 throw new TaskNotAllowed(__('This task is not yours to complete.'));
             }
 
-            WorkflowTask::query()
+            $task->newQuery()
                 ->where('instance_id', $task->instance_id)
                 ->where('round', $task->round)
                 ->where('name', $task->name)
@@ -896,8 +909,8 @@ final class WorkflowEngine
      */
     public function reassign(WorkflowTask $task, string|Authenticatable $assignee, Authenticatable|Actor|null $by = null): WorkflowTask
     {
-        return $this->transaction(function () use ($task, $assignee, $by) {
-            $task = WorkflowTask::query()->lockForUpdate()->findOrFail($task->getKey());
+        return $this->transactionOn($task->getConnectionName(), function () use ($task, $assignee, $by) {
+            $task = $task->newQuery()->lockForUpdate()->findOrFail($task->getKey());
 
             if (! $task->isOpen()) {
                 throw new TaskNotAllowed(__('This task is already closed.'));
@@ -970,8 +983,8 @@ final class WorkflowEngine
             }
 
             if ($definition->getState($instance->state)->timers !== []) {
-                $this->transaction(function () use ($instance) {
-                    $instance = WorkflowInstance::query()->lockForUpdate()->find($instance->getKey());
+                $this->transactionOn($instance->getConnectionName(), function () use ($instance) {
+                    $instance = $instance->newQuery()->lockForUpdate()->find($instance->getKey());
                     $this->scheduleTimer($this->contextFor($instance));
                     $instance->save();
                 });
@@ -985,8 +998,8 @@ final class WorkflowEngine
      */
     public function sync(WorkflowInstance $instance, Model $subject, string $state, Actor $actor, ?string $comment = null): void
     {
-        $this->transaction(function () use ($instance, $subject, $state, $actor, $comment) {
-            $instance = WorkflowInstance::query()->lockForUpdate()->findOrFail($instance->getKey());
+        $this->transactionOn($instance->getConnectionName(), function () use ($instance, $subject, $state, $actor, $comment) {
+            $instance = $instance->newQuery()->lockForUpdate()->findOrFail($instance->getKey());
             $definition = $instance->definition();
             $from = $instance->state;
             $instance->setRelation('subject', $subject);
@@ -1011,8 +1024,8 @@ final class WorkflowEngine
      */
     public function suspend(Model $subject): void
     {
-        $this->transaction(function () use ($subject) {
-            WorkflowInstance::query()->forSubject($subject)->whereIn('status', [WorkflowInstance::ACTIVE, WorkflowInstance::COMPLETED])->get()
+        $this->transactionOn(Connections::for($subject), function () use ($subject) {
+            WorkflowInstance::on(Connections::for($subject))->forSubject($subject)->whereIn('status', [WorkflowInstance::ACTIVE, WorkflowInstance::COMPLETED])->get()
                 ->each(function (WorkflowInstance $instance) {
                     $instance->openTasks()->update(['status' => WorkflowTask::CANCELLED, 'completed_at' => now()]);
                     $instance->forceFill(['status' => WorkflowInstance::SUSPENDED, 'context' => [...($instance->context ?? []), '_suspended_from' => $instance->status]])->save();
@@ -1025,8 +1038,8 @@ final class WorkflowEngine
      */
     public function resume(Model $subject): void
     {
-        $this->transaction(function () use ($subject) {
-            WorkflowInstance::query()->forSubject($subject)->where('status', WorkflowInstance::SUSPENDED)->get()
+        $this->transactionOn(Connections::for($subject), function () use ($subject) {
+            WorkflowInstance::on(Connections::for($subject))->forSubject($subject)->where('status', WorkflowInstance::SUSPENDED)->get()
                 ->each(function (WorkflowInstance $instance) use ($subject) {
                     $context = $instance->context ?? [];
                     $status = $context['_suspended_from'] ?? WorkflowInstance::ACTIVE;
@@ -1048,8 +1061,8 @@ final class WorkflowEngine
      */
     public function cancel(WorkflowInstance $instance, Authenticatable|Actor|null $actor = null, ?string $reason = null): void
     {
-        $this->transaction(function () use ($instance, $actor, $reason) {
-            $instance = WorkflowInstance::query()->lockForUpdate()->findOrFail($instance->getKey());
+        $this->transactionOn($instance->getConnectionName(), function () use ($instance, $actor, $reason) {
+            $instance = $instance->newQuery()->lockForUpdate()->findOrFail($instance->getKey());
             $instance->openTasks()->update(['status' => WorkflowTask::CANCELLED, 'completed_at' => now()]);
             $instance->forceFill(['status' => WorkflowInstance::CANCELLED, 'timer_at' => null, 'timer_transition' => null])->save();
 
@@ -1064,8 +1077,8 @@ final class WorkflowEngine
     public function forget(Model $subject): void
     {
         // Children are removed explicitly: foreign keys may not be enforced (SQLite).
-        $this->transaction(function () use ($subject) {
-            WorkflowInstance::query()->forSubject($subject)->get()->each(function (WorkflowInstance $instance) {
+        $this->transactionOn(Connections::for($subject), function () use ($subject) {
+            WorkflowInstance::on(Connections::for($subject))->forSubject($subject)->get()->each(function (WorkflowInstance $instance) {
                 $instance->history()->delete();
                 $instance->tasks()->delete();
                 $instance->approvals()->delete();
@@ -1202,10 +1215,24 @@ final class WorkflowEngine
      */
     private function transaction(Closure $callback): mixed
     {
+        return $this->transactionOn(config('workflow.connection'), $callback);
+    }
+
+    /**
+     * transaction() on the connection that holds the workflow being written
+     * (Support\Connections).
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    private function transactionOn(?string $connection, Closure $callback): mixed
+    {
         $this->depth++;
 
         try {
-            $result = $this->db->connection(config('workflow.connection'))->transaction(fn () => self::writing($callback));
+            $result = $this->db->connection($connection)->transaction(fn () => self::writing($callback));
         } catch (Throwable $e) {
             if (--$this->depth === 0) {
                 $this->buffered = [];

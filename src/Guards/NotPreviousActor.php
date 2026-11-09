@@ -25,7 +25,7 @@ final class NotPreviousActor implements Guard
             return GuardResult::allow();
         }
 
-        $last = WorkflowHistory::query()
+        $last = WorkflowHistory::on($context->instance->getConnectionName())
             ->where('instance_id', $context->instance->getKey())
             ->whereIn('transition', $this->transitions)
             ->latest('id')

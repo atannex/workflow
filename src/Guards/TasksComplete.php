@@ -22,7 +22,7 @@ final class TasksComplete implements Guard
 
     public function check(Context $context): GuardResult
     {
-        $tasks = WorkflowTask::query()
+        $tasks = WorkflowTask::on($context->instance->getConnectionName())
             ->where('instance_id', $context->instance->getKey())
             ->where('state', $context->instance->state)
             ->where('round', $context->instance->round)

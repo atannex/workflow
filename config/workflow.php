@@ -36,6 +36,17 @@ return [
 
     'connection' => env('WORKFLOW_DB_CONNECTION'),
 
+    /*
+    | An application that keeps some models on their own database (a model
+    | with its own $connection) can keep their workflows there too, so
+    | inWorkflowState() still runs in one query. Each such database needs the
+    | workflow tables. The scheduler and listings run on "connection" and on
+    | each of "connections".
+    */
+    'follow_subject_connection' => (bool) env('WORKFLOW_FOLLOW_SUBJECT_CONNECTION', false),
+
+    'connections' => [],
+
     'tables' => [
         'instances' => 'workflow_instances',
         'history' => 'workflow_history',

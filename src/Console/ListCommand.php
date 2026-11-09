@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Atannex\Workflow\Console;
 
 use Atannex\Workflow\Models\WorkflowInstance;
+use Atannex\Workflow\Support\Connections;
 use Atannex\Workflow\WorkflowRegistry;
 use Illuminate\Console\Command;
 
@@ -25,11 +26,14 @@ final class ListCommand extends Command
         }
 
         foreach ($definitions as $definition) {
-            $counts = WorkflowInstance::query()
-                ->where('workflow', $definition->name)
-                ->selectRaw('state, count(*) as total')
-                ->groupBy('state')
-                ->pluck('total', 'state');
+            $counts = [];
+
+            // Every database that holds workflows (Support\Connections).
+            foreach (Connections::all() as $connection) {
+                foreach (WorkflowInstance::on($connection)->where('workflow', $definition->name)->selectRaw('state, count(*) as total')->groupBy('state')->pluck('total', 'state') as $state => $total) {
+                    $counts[$state] = ($counts[$state] ?? 0) + (int) $total;
+                }
+            }
 
             $this->components->twoColumnDetail("<fg=green;options=bold>{$definition->name}</> {$definition->label}", implode(', ', array_map('class_basename', $definition->subjects)));
 
