@@ -36,6 +36,15 @@ The package migrations are included. Publish them with `--tag=workflow-migration
 
 ### 1. Add the trait to your model
 
+The example below uses a `status` column to mirror the workflow state and an `author_id` column to identify the post's owner, so make sure your `posts` table has both:
+
+```php
+$table->string('status')->nullable();
+$table->foreignId('author_id')->constrained('users');
+```
+
+Then add the trait:
+
 ```php
 use Atannex\Workflow\Concerns\HasWorkflow;
 use Illuminate\Database\Eloquent\Model;
@@ -66,6 +75,7 @@ class EditorialWorkflow implements DefinesWorkflow
         return WorkflowDefinition::make('editorial')
             ->for(Post::class)
             ->column('status')
+            ->ownerUsing(fn (Post $post) => $post->author_id)
             ->state('draft')
             ->state('review', fn (State $state) => $state->assign('role:editor'))
             ->state('published', fn (State $state) => $state->final())
@@ -95,7 +105,9 @@ Add the class to the `workflows` array in `config/workflow.php`:
 $post = Post::create([
     'title' => 'My first post',
     'body' => 'Post content',
+    'author_id' => $author->id,
 ]);
+// The workflow starts automatically: the post is now in "draft".
 
 // Apply a transition.
 $post->workflow()->apply('submit', $author);
@@ -109,6 +121,17 @@ $post->workflow()->apply('publish', $editor);
 
 $post->workflow()->is('published'); // true
 $post->workflow()->history();
+```
+
+`$editor` must hold the `editor` role. Roles are read from spatie/laravel-permission when it is installed. Without it, tell the package how to find a user's roles, for example in `AppServiceProvider::boot()`:
+
+```php
+use Atannex\Workflow\Support\Assignees;
+
+app(Assignees::class)->resolveIdentitiesUsing(fn ($user) => [
+    'role' => $user->roles->pluck('name')->all(),
+    'permission' => [],
+]);
 ```
 
 ## What it supports
